@@ -13,12 +13,12 @@ import (
 func DecodeRequest(ctx context.Context, r *http.Request, container interface{}) (err error) {
 	switch r.Method {
 	case "POST", "PUT", "PATCH":
-		err = magic.Decode(r, &container,
+		err = magic.Decode(r, container,
 			magic.JSON,
 			magic.ChiRouter,
 		)
 	case "GET", "DELETE":
-		err = magic.Decode(r, &container,
+		err = magic.Decode(r, container,
 			magic.QueryParams,
 			magic.ChiRouter,
 		)
