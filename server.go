@@ -36,6 +36,7 @@ func NewServer(
 	options ...ServerOption,
 ) *Server {
 	s := &Server{
+		handler:      handler,
 		enc:          enc,
 		errorEncoder: DefaultErrorEncoder,
 		errorHandler: NewLogErrorHandler(log.NewNopLogger()),
