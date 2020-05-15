@@ -238,3 +238,30 @@ func (w *interceptingWriter) Write(p []byte) (int, error) {
 	w.written += int64(n)
 	return n, err
 }
+
+var _ StatusCoder = (*ReponseCode)(nil)
+var _ json.Marshaler = (*ReponseCode)(nil)
+
+// ReponseCode implements StatusCoder and json.Marshaler
+type ReponseCode struct {
+	resp interface{}
+	code int
+}
+
+// StatusCode returns the given status code
+func (r *ReponseCode) StatusCode() int {
+	return r.code
+}
+
+// StatusCode returns the marshaling result of provided response
+func (r *ReponseCode) MarshalJSON() ([]byte, error) {
+	return json.Marshal(r.resp)
+}
+
+// AddStatusCode add the given code to the encoder using the provieded response
+func AddStatusCode(resp interface{}, code int) *ReponseCode {
+	return &ReponseCode{
+		resp: resp,
+		code: code,
+	}
+}
