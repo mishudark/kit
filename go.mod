@@ -1,6 +1,6 @@
 module github.com/mishudark/kit
 
-go 1.14
+go 1.16
 
 require (
 	github.com/go-logfmt/logfmt v0.5.0
