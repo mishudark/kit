@@ -11,6 +11,7 @@ import (
 // endpoint.
 type RequestFunc func(context.Context, *http.Request) context.Context
 
+
 // ErrorEncoder is responsible for encoding an error to the ResponseWriter.
 // Users are encouraged to use custom ErrorEncoders to encode HTTP errors to
 // their clients, and will likely want to pass and check for their own error
@@ -21,16 +22,17 @@ type ErrorEncoder func(ctx context.Context, err error, w http.ResponseWriter)
 // request object. It's designed to be used in HTTP servers, for server-side
 // endpoints. One straightforward DecodeRequestFunc could be something that
 // JSON decodes from the request body to the concrete request type.
-type DecodeRequestFunc(type I) func(context.Context, *http.Request) (req I, err error)
+type DecodeRequestFunc[I any] func(context.Context, *http.Request) (req I, err error)
 
 // EncodeResponseFunc encodes the passed response object to the HTTP response
 // writer. It's designed to be used in HTTP servers, for server-side
 // endpoints. One straightforward EncodeResponseFunc could be something that
 // JSON encodes the object directly to the response body.
-type EncodeReponseFunc(type O) func(context.Context, http.ResponseWriter, O) error
+type EncodeReponseFunc[O any] func(context.Context, http.ResponseWriter, O) error
 
 // HandlerFunc performs the business logic for the service.
-type HandlerFunc(type I, O) func(context.Context, I) (resp O, err error)
+type HandlerFunc[I, O any] func(context.Context, I) (resp O, err error)
+
 
 // DefaultErrorEncoder writes the error to the ResponseWriter, by default a
 // content type of text/plain, a body of the plain text of the error, and a
@@ -81,7 +83,7 @@ type Headerer interface {
 // a sensible default. If the response implements Headerer, the provided headers
 // will be applied to the response. If the response implements StatusCoder, the
 // provided StatusCode will be used instead of 200.
-func EncodeJSONResponse(type O)(_ context.Context, w http.ResponseWriter, response O) error {
+func EncodeJSONResponse[O any](_ context.Context, w http.ResponseWriter, response O) error {
 	// convert response to an interface to check if it implements StatusCoder or Headerer
 	var r interface{} = response
 
@@ -106,16 +108,17 @@ func EncodeJSONResponse(type O)(_ context.Context, w http.ResponseWriter, respon
 }
 
 // Server wraps an business logic service and implements http.Handler.
-type Server(type I, O) struct {
-	h            HandlerFunc(I, O)
-	dec          DecodeRequestFunc(I)
-	enc          EncodeReponseFunc(O)
+type Server[I, O any] struct {
+	h            HandlerFunc[I, O]
+	dec          DecodeRequestFunc[I]
+	enc          EncodeReponseFunc[O]
 	before       []RequestFunc
+	after        []ServerResponseFunc
 	errorEncoder ErrorEncoder
 }
 
 // ServeHTTP implements http.Handler.
-func (s Server(I, O)) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s Server[I, O]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	for _, f := range s.before {
@@ -134,6 +137,10 @@ func (s Server(I, O)) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, f := range s.after {
+		ctx = f(ctx, w)
+	}
+
 	err = s.enc(ctx, w, resp)
 	if err != nil {
 		s.errorEncoder(ctx, err, w)
@@ -141,24 +148,31 @@ func (s Server(I, O)) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServerOption sets an optional parameter for servers.
-type ServerOption(type I, O) func(*Server(I, O))
+type ServerOption[I, O any] func(*Server[I, O])
 
 // ServerBefore functions are executed on the HTTP request object before the
 // request is decoded.
-func ServerBefore(type I, O)(before ...RequestFunc) ServerOption(I, O) {
-	return func(s *Server(I, O)) {
+func ServerBefore[I, O any](before ...RequestFunc) ServerOption[I, O] {
+	return func(s *Server[I, O]) {
 		s.before = append(s.before, before...)
 	}
 }
 
+// ServerResponseFunc may take information from a request context and use it to
+// manipulate a ResponseWriter. ServerResponseFuncs are only executed in
+// servers, after invoking the endpoint but prior to writing a response.
+type ServerResponseFunc func(context.Context, http.ResponseWriter) context.Context
+
+
+
 // NewServer constructs a new server, which implements http.Handler.
-func NewServer(type I, O)(
-	h HandlerFunc(I, O),
-	dec DecodeRequestFunc(I),
-	enc EncodeReponseFunc(O),
-	options ...ServerOption(I, O),
-) *Server(I, O) {
-	s := &Server(I, O){
+func NewServer[I, O any](
+	h HandlerFunc[I, O],
+	dec DecodeRequestFunc[I],
+	enc EncodeReponseFunc[O],
+	options ...ServerOption[I, O],
+) *Server[I, O] {
+	s := &Server[I, O]{
 		h:            h,
 		dec:          dec,
 		enc:          enc,

@@ -10,7 +10,7 @@ import (
 )
 
 // DecodeSaveRequest decodes a POST, PUT or PATCH request
-func DecodeRequest(type I)(ctx context.Context, r *http.Request) (in I, err error) {
+func DecodeRequest[I any](ctx context.Context, r *http.Request) (in I, err error) {
 	switch r.Method {
 	case "POST", "PUT", "PATCH":
 		err = magic.Decode(r, &in,
