@@ -11,12 +11,18 @@ import (
 // endpoint.
 type RequestFunc func(context.Context, *http.Request) context.Context
 
-
 // ErrorEncoder is responsible for encoding an error to the ResponseWriter.
 // Users are encouraged to use custom ErrorEncoders to encode HTTP errors to
 // their clients, and will likely want to pass and check for their own error
 // types. See the example shipping/handling service.
 type ErrorEncoder func(ctx context.Context, err error, w http.ResponseWriter)
+
+// ServerFinalizerFunc can be used to perform work at the end of an HTTP
+// request, after the response has been written to the client. The principal
+// intended use is for request logging. In addition to the response code
+// provided in the function signature, additional response parameters are
+// provided in the context under keys with the ContextKeyResponse prefix.
+type ServerFinalizerFunc func(ctx context.Context, code int, r *http.Request)
 
 // DecodeRequestFunc extracts a user-domain request object from an HTTP
 // request object. It's designed to be used in HTTP servers, for server-side
@@ -32,7 +38,6 @@ type EncodeReponseFunc[O any] func(context.Context, http.ResponseWriter, O) erro
 
 // HandlerFunc performs the business logic for the service.
 type HandlerFunc[I, O any] func(context.Context, I) (resp O, err error)
-
 
 // DefaultErrorEncoder writes the error to the ResponseWriter, by default a
 // content type of text/plain, a body of the plain text of the error, and a
@@ -85,7 +90,7 @@ type Headerer interface {
 // provided StatusCode will be used instead of 200.
 func EncodeJSONResponse[O any](_ context.Context, w http.ResponseWriter, response O) error {
 	// convert response to an interface to check if it implements StatusCoder or Headerer
-	var r interface{} = response
+	var r any = response
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -115,11 +120,40 @@ type Server[I, O any] struct {
 	before       []RequestFunc
 	after        []ServerResponseFunc
 	errorEncoder ErrorEncoder
+	finalizer    []ServerFinalizerFunc
+	errorHandler ErrorHandler
+}
+
+// ServerErrorHandler is used to handle non-terminal errors. By default, non-terminal errors
+// are ignored. This is intended as a diagnostic measure. Finer-grained control
+// of error handling, including logging in more detail, should be performed in a
+// custom ServerErrorEncoder or ServerFinalizer, both of which have access to
+// the context.
+func ServerErrorHandler[I, O any](errorHandler ErrorHandler) ServerOption[I, O] {
+	return func(s *Server[I, O]) { s.errorHandler = errorHandler }
+}
+
+// ServerFinalizer is executed at the end of every HTTP request.
+// By default, no finalizer is registered.
+func ServerFinalizer[I, O any](f ...ServerFinalizerFunc) ServerOption[I, O] {
+	return func(s *Server[I, O]) { s.finalizer = append(s.finalizer, f...) }
 }
 
 // ServeHTTP implements http.Handler.
 func (s Server[I, O]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	if len(s.finalizer) > 0 {
+		iw := &interceptingWriter{w, http.StatusOK, 0}
+		defer func() {
+			ctx = context.WithValue(ctx, ContextKeyResponseHeaders, iw.Header())
+			ctx = context.WithValue(ctx, ContextKeyResponseSize, iw.written)
+			for _, f := range s.finalizer {
+				f(ctx, iw.code, r)
+			}
+		}()
+		w = iw
+	}
 
 	for _, f := range s.before {
 		ctx = f(ctx, r)
@@ -127,12 +161,14 @@ func (s Server[I, O]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req, err := s.dec(ctx, r)
 	if err != nil {
+		s.errorHandler.Handle(ctx, err)
 		s.errorEncoder(ctx, err, w)
 		return
 	}
 
 	resp, err := s.h(ctx, req)
 	if err != nil {
+		s.errorHandler.Handle(ctx, err)
 		s.errorEncoder(ctx, err, w)
 		return
 	}
@@ -143,6 +179,7 @@ func (s Server[I, O]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	err = s.enc(ctx, w, resp)
 	if err != nil {
+		s.errorHandler.Handle(ctx, err)
 		s.errorEncoder(ctx, err, w)
 	}
 }
@@ -163,8 +200,6 @@ func ServerBefore[I, O any](before ...RequestFunc) ServerOption[I, O] {
 // servers, after invoking the endpoint but prior to writing a response.
 type ServerResponseFunc func(context.Context, http.ResponseWriter) context.Context
 
-
-
 // NewServer constructs a new server, which implements http.Handler.
 func NewServer[I, O any](
 	h HandlerFunc[I, O],
@@ -177,6 +212,7 @@ func NewServer[I, O any](
 		dec:          dec,
 		enc:          enc,
 		errorEncoder: DefaultErrorEncoder,
+		errorHandler: ErrorHandlerFunc(LogErrorHandler),
 	}
 
 	for _, option := range options {
@@ -184,4 +220,50 @@ func NewServer[I, O any](
 	}
 
 	return s
+}
+
+type interceptingWriter struct {
+	http.ResponseWriter
+	code    int
+	written int64
+}
+
+// WriteHeader may not be explicitly called, so care must be taken to
+// initialize w.code to its default value of http.StatusOK.
+func (w *interceptingWriter) WriteHeader(code int) {
+	w.code = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *interceptingWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	w.written += int64(n)
+	return n, err
+}
+
+var _ StatusCoder = (*ReponseCode)(nil)
+var _ json.Marshaler = (*ReponseCode)(nil)
+
+// ReponseCode implements StatusCoder and json.Marshaler
+type ReponseCode struct {
+	resp any
+	code int
+}
+
+// StatusCode returns the given status code
+func (r *ReponseCode) StatusCode() int {
+	return r.code
+}
+
+// StatusCode returns the marshaling result of provided response
+func (r *ReponseCode) MarshalJSON() ([]byte, error) {
+	return json.Marshal(r.resp)
+}
+
+// AddStatusCode add the given code to the encoder using the provieded response
+func AddStatusCode(resp any, code int) *ReponseCode {
+	return &ReponseCode{
+		resp: resp,
+		code: code,
+	}
 }
