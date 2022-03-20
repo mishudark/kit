@@ -6,7 +6,7 @@ import (
 
 // ForEach should iterate over the provided items to perform any operation
 // example:
-// func(item interface{}) error {
+// func(item int) error {
 //    log.Println(item)
 //    return nil
 // }
@@ -15,7 +15,7 @@ type ForEach[T any] func(item T) error
 // Run an operation concurrently with the given number of provided workers
 // example:
 // items := make(chan Foo)
-// for err := range Run(10, myCustom, items) {
+// for err := range Run(10, items, forEachFn) {
 //   log.Println(err)
 // }
 func Run[T any](workers int, items <-chan T, forEach ForEach[T]) chan error {
@@ -40,4 +40,3 @@ func Run[T any](workers int, items <-chan T, forEach ForEach[T]) chan error {
 
 	return err
 }
-
