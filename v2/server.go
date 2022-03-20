@@ -17,6 +17,12 @@ type RequestFunc func(context.Context, *http.Request) context.Context
 // types. See the example shipping/handling service.
 type ErrorEncoder func(ctx context.Context, err error, w http.ResponseWriter)
 
+// NopRequestDecoder is a DecodeRequestFunc that can be used for requests that do not
+// need to be decoded, and simply returns nil, nil.
+func NopRequestDecoder(ctx context.Context, r *http.Request) (interface{}, error) {
+	return nil, nil
+}
+
 // ServerFinalizerFunc can be used to perform work at the end of an HTTP
 // request, after the response has been written to the client. The principal
 // intended use is for request logging. In addition to the response code
@@ -192,6 +198,14 @@ type ServerOption[I, O any] func(*Server[I, O])
 func ServerBefore[I, O any](before ...RequestFunc) ServerOption[I, O] {
 	return func(s *Server[I, O]) {
 		s.before = append(s.before, before...)
+	}
+}
+
+// ServerAfter functions are executed on the HTTP response writer after the
+// endpoint is invoked, but before anything is written to the client.
+func ServerAfter[I, O any](after ...ServerResponseFunc) ServerOption[I, O] {
+	return func(s *Server[I, O]) {
+		s.after = append(s.after, after...)
 	}
 }
 
