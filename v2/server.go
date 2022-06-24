@@ -19,7 +19,7 @@ type ErrorEncoder func(ctx context.Context, err error, w http.ResponseWriter)
 
 // NopRequestDecoder is a DecodeRequestFunc that can be used for requests that do not
 // need to be decoded, and simply returns nil, nil.
-func NopRequestDecoder(ctx context.Context, r *http.Request) (interface{}, error) {
+func NopRequestDecoder(ctx context.Context, r *http.Request) (any, error) {
 	return nil, nil
 }
 
