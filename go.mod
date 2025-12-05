@@ -7,7 +7,7 @@ require (
 	github.com/go-stack/stack v1.8.1
 	github.com/mishudark/errors v0.0.0-20210318113247-bd4e9ef2fc74
 	github.com/mishudark/magic v0.0.0-20200508153917-1a13751f1a5a
-	github.com/sirupsen/logrus v1.8.1
+	github.com/sirupsen/logrus v1.8.3
 )
 
 require (
